@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Chorus Melody & Beat Reader</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #0f172a;
+      --border: #cbd5e1;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      padding: 16px;
+      min-height: 100vh;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 480px;
+      background: var(--card-bg);
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    h1 {
+      font-size: 1.25rem;
+      text-align: center;
+      color: var(--text);
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    label {
+      font-weight: 600;
+      font-size: 0.875rem;
+      color: #475569;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.95rem;
+      outline: none;
+    }
+
+    input[type="text"]:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+
+    .tempo-control {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .tempo-control input[type="range"] {
+      flex: 1;
+    }
+
+    .controls {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      flex: 1;
+      padding: 14px;
+      background-color: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    button:hover {
+      background-color: var(--primary-hover);
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    .notes-display {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 12px;
+      background: #f1f5f9;
+      border-radius: 8px;
+      min-height: 56px;
+      align-items: center;
+    }
+
+    .note-chip {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 6px 10px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .note-chip .sub {
+      font-size: 0.72rem;
+      color: #64748b;
+      font-weight: normal;
+    }
+
+    .note-chip.active {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    .note-chip.active .sub {
+      color: #e2e8f0;
+    }
+
+    .qr-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+    }
+
+    #qrcode {
+      padding: 12px;
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .share-hint {
+      font-size: 0.8rem;
+      color: #64748b;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>Chorus Melody & Beat Reader</h1>
+
+    <div class="input-group">
+      <label for="singleLineInput">Notebook Notation Input</label>
+      <input type="text" id="singleLineInput" placeholder="e.g. 1# E F G F E A B F G E 1 2 3 5 6 7 10 11 12 13/16">
+    </div>
+
+    <div class="tempo-control">
+      <label for="bpm">Tempo: <span id="bpmVal">120</span> BPM</label>
+      <input type="range" id="bpm" min="40" max="240" value="120">
+    </div>
+
+    <div class="controls">
+      <button id="playBtn">Play Melody</button>
+      <button id="shareBtn" style="background-color: #475569;">Update Link & QR</button>
+    </div>
+
+    <div class="input-group">
+      <label>Parsed Notes & Calculated Beats</label>
+      <div id="notesContainer" class="notes-display"></div>
+    </div>
+
+    <div class="qr-section">
+      <div id="qrcode"></div>
+      <p class="share-hint">Scan with iPhone or Samsung camera to open this score.</p>
+    </div>
+  </div>
+
+  <script>
+    const inputEl = document.getElementById('singleLineInput');
+    const playBtn = document.getElementById('playBtn');
+    const shareBtn = document.getElementById('shareBtn');
+    const notesContainer = document.getElementById('notesContainer');
+    const qrcodeContainer = document.getElementById('qrcode');
+    const bpmInput = document.getElementById('bpm');
+    const bpmVal = document.getElementById('bpmVal');
+
+    let audioCtx = null;
+    const baseFreqs = {
+      'C': 261.63, 'D': 293.66, 'E': 329.63,
+      'F': 349.23, 'G': 392.00, 'A': 440.00, 'B': 493.88
+    };
+
+    bpmInput.addEventListener('input', () => {
+      bpmVal.textContent = bpmInput.value;
+    });
+
+    function loadFromUrl() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const songParam = urlParams.get('song');
+      if (songParam) {
+        inputEl.value = songParam;
+      } else {
+        inputEl.value = "1# E F G F E A B F G E 1 2 3 5 6 7 10 11 12 13/16";
+      }
+      parseAndDisplay();
+      generateQR();
+    }
+
+    function parseScore(rawText) {
+      const tokens = rawText.trim().split(/\s+/);
+      let keySig = "";
+      let rawNotes = [];
+      let positions = [];
+      let measureEndPos = 16;
+
+      tokens.forEach(token => {
+        if (token.includes('#') || token.includes('b')) {
+          keySig = token;
+        } else if (/^[A-Ga-g]$/.test(token)) {
+          rawNotes.push(token.toUpperCase());
+        } else if (token.includes('/')) {
+          const parts = token.split('/');
+          positions.push(parseFloat(parts[0]));
+          measureEndPos = parseFloat(parts[1]) || 16;
+        } else if (!isNaN(parseFloat(token))) {
+          positions.push(parseFloat(token));
+        }
+      });
+
+      // Calculate beat durations based on step differences
+      const parsedNotes = rawNotes.map((name, i) => {
+        let freq = baseFreqs[name];
+        if (keySig === '1#' && name === 'F') freq = 369.99; // F#4
+
+        const currentPos = positions[i] !== undefined ? positions[i] : (i + 1);
+        const nextPos = (i + 1 < positions.length) ? positions[i + 1] : (measureEndPos + 1);
+        
+        // Difference calculation: e.g., 5 - 3 = 2 beats
+        const beats = Math.max(1, nextPos - currentPos);
+
+        return {
+          name: (keySig === '1#' && name === 'F') ? 'F#' : name,
+          freq: freq,
+          pos: currentPos,
+          beats: beats
+        };
+      });
+
+      return parsedNotes;
+    }
+
+    function parseAndDisplay() {
+      const notes = parseScore(inputEl.value);
+      notesContainer.innerHTML = '';
+      notes.forEach((item, idx) => {
+        const chip = document.createElement('div');
+        chip.className = 'note-chip';
+        chip.id = `note-${idx}`;
+        chip.innerHTML = `<span>${item.name}</span><span class="sub">${item.beats} ${item.beats === 1 ? 'beat' : 'beats'}</span>`;
+        notesContainer.appendChild(chip);
+      });
+    }
+
+    function generateQR() {
+      const currentUrl = new URL(window.location.href);
+      currentUrl.searchParams.set('song', inputEl.value);
+      window.history.replaceState({}, '', currentUrl.toString());
+
+      qrcodeContainer.innerHTML = '';
+      new QRCode(qrcodeContainer, {
+        text: currentUrl.toString(),
+        width: 160,
+        height: 160,
+        colorDark: "#0f172a",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.M
+      });
+    }
+
+    function playMelody() {
+      const notes = parseScore(inputEl.value);
+      if (!notes.length) return;
+
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+
+      const bpm = parseFloat(bpmInput.value);
+      const beatSec = 60 / bpm; // Base duration of 1 step/beat in seconds
+
+      let currentTimeOffset = 0;
+
+      notes.forEach((noteObj, idx) => {
+        const startTime = audioCtx.currentTime + currentTimeOffset;
+        const noteDurationSec = noteObj.beats * beatSec;
+
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(noteObj.freq, startTime);
+
+        gain.gain.setValueAtTime(0.001, startTime);
+        gain.gain.linearRampToValueAtTime(0.3, startTime + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + noteDurationSec - 0.02);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc.start(startTime);
+        osc.stop(startTime + noteDurationSec);
+
+        const highlightDelay = currentTimeOffset * 1000;
+        setTimeout(() => {
+          document.querySelectorAll('.note-chip').forEach(c => c.classList.remove('active'));
+          const activeChip = document.getElementById(`note-${idx}`);
+          if (activeChip) activeChip.classList.add('active');
+        }, highlightDelay);
+
+        currentTimeOffset += noteDurationSec;
+      });
+
+      setTimeout(() => {
+        document.querySelectorAll('.note-chip').forEach(c => c.classList.remove('active'));
+      }, currentTimeOffset * 1000);
+    }
+
+    playBtn.addEventListener('click', playMelody);
+    shareBtn.addEventListener('click', () => {
+      parseAndDisplay();
+      generateQR();
+    });
+    inputEl.addEventListener('input', parseAndDisplay);
+
+    window.addEventListener('DOMContentLoaded', loadFromUrl);
+  </script>
+</body>
+</html>
