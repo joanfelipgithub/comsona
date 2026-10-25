@@ -345,21 +345,25 @@
     }
 
     function generateQR() {
-      const currentUrl = new URL(window.location.href);
-      currentUrl.searchParams.set('song', inputEl.value);
+       const songNotation = inputEl.value.trim();
+  
+       // Construct the exact target URL for singers
+       const shareUrl = "https://joanfelipgithub.github.io/comsona/?song=" + songNotation;
 
-      window.history.replaceState({}, '', currentUrl.toString());
+       // Update browser address bar without reloading
+       window.history.replaceState({}, '', shareUrl);
 
-      qrcodeContainer.innerHTML = '';
-      new QRCode(qrcodeContainer, {
-        text: currentUrl.toString(),
-        width: 160,
-        height: 160,
-        colorDark: "#0f172a",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.M
-      });
-    }
+       // Clear previous QR code and render the new scannable code
+       qrcodeContainer.innerHTML = '';
+       new QRCode(qrcodeContainer, {
+         text: shareUrl,
+         width: 160,
+         height: 160,
+         colorDark: "#0f172a",
+         colorLight: "#ffffff",
+         correctLevel: QRCode.CorrectLevel.M
+       });
+     }
 
     function playMelody() {
       const notes = parseScore(inputEl.value);
