@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Chorus Melody & Beat Reader</title>
-  <!-- Load QRCode.js for generating QR codes directly in browser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     :root {
@@ -186,7 +185,7 @@
 
     <div class="input-group">
       <label for="singleLineInput">Notebook Notation Input</label>
-      <input type="text" id="singleLineInput" placeholder="e.g. 1w E F G F E A B F G E 1 2 3 5 6 7 10 11 12 13_16">
+      <input type="text" id="singleLineInput" placeholder="e.g. 1wEFGFEABFGE12356710111213_16">
     </div>
 
     <div class="tempo-control">
@@ -206,7 +205,7 @@
 
     <div class="qr-section">
       <div id="qrcode"></div>
-      <p class="share-hint">Scan with iPhone or Samsung camera to open this exact score.</p>
+      <p class="share-hint">Scan with iPhone or Samsung camera to open this score.</p>
     </div>
   </div>
 
@@ -229,65 +228,83 @@
       bpmVal.textContent = bpmInput.value;
     });
 
-    // Extract song notation from URL parameter on page load
     function loadFromUrl() {
       const urlParams = new URLSearchParams(window.location.search);
-      const songParam = urlParams.get('song');
+      let songParam = urlParams.get('song');
 
       if (songParam) {
         inputEl.value = songParam;
       } else {
-        // Default URL-safe sample string
-        inputEl.value = "1w E F G F E A B F G E 1 2 3 5 6 7 10 11 12 13_16";
+        inputEl.value = "1wEFGFEABFGE12356710111213_16";
       }
       parseAndDisplay();
       generateQR();
     }
 
-    // Parse key signatures, note symbols, step positions, and measure end length
     function parseScore(rawText) {
-      // Clean string and handle URL decode '+' as spaces
-      const cleanText = rawText.replace(/\+/g, ' ').trim();
-      const tokens = cleanText.split(/[\s,]+/).filter(Boolean);
+      let cleanStr = rawText.replace(/\+/g, '').replace(/\s+/g, '').trim();
 
+      // 1. Key Signature
       let keySig = "";
-      let rawNotes = [];
-      let positions = [];
+      const keyMatch = cleanStr.match(/^(\d+[wsWS#b])/);
+      if (keyMatch) {
+        keySig = keyMatch[1].toLowerCase().replace('w', '#').replace('s', 'b');
+        cleanStr = cleanStr.slice(keyMatch[0].length);
+      }
+
+      // 2. Measure end boundary
       let measureEndPos = 16;
-
-      // Check first token for key signature (e.g. 1w, 1s, 1#, 1b)
-      if (tokens.length && /^\d+[wsWS#b]$/.test(tokens[0])) {
-        const keyToken = tokens.shift();
-        keySig = keyToken.toLowerCase().replace('w', '#').replace('s', 'b');
+      const endMatch = cleanStr.match(/_(\d+)$/);
+      if (endMatch) {
+        measureEndPos = parseFloat(endMatch[1]);
+        cleanStr = cleanStr.replace(/_\d+$/, '');
       }
 
-      // Check last token for measure end length (e.g. _16 or /16)
-      if (tokens.length && /[_/]\d+$/.test(tokens[tokens.length - 1])) {
-        const lastToken = tokens.pop();
-        const endMatch = lastToken.match(/[_/](\d+)$/);
-        if (endMatch) measureEndPos = parseFloat(endMatch[1]) || 16;
+      // 3. Extract Notes
+      const rawNotes = [];
+      const noteRegex = /([A-Ga-g][wsWS#b]?)/g;
+      let match;
+      let lastIndex = 0;
 
-        const prefix = lastToken.replace(/[_/]\d+$/, '');
-        if (prefix && !isNaN(parseFloat(prefix))) {
-          tokens.push(prefix);
-        }
+      while ((match = noteRegex.exec(cleanStr)) !== null) {
+        if (/\d/.test(match[1])) break;
+        let norm = match[1].toUpperCase().replace('W', '#').replace('S', 'b');
+        rawNotes.push(norm);
+        lastIndex = noteRegex.lastIndex;
       }
 
-      tokens.forEach(token => {
-        if (/^[A-Ga-g][wsWS#b]?$/.test(token)) {
-          let normNote = token.toUpperCase().replace('W', '#').replace('S', 'b');
-          rawNotes.push(normNote);
-        } else if (!isNaN(parseFloat(token))) {
-          positions.push(parseFloat(token));
-        }
-      });
+      // 4. Smart recursive sequence solver for unspaced digits
+      const digitsStr = cleanStr.slice(lastIndex);
+      const noteCount = rawNotes.length;
 
-      // Calculate frequencies and rhythmic beat durations
+      function solvePositions(str, count, prevVal) {
+        if (count === 0) return str === "" ? [] : null;
+        if (!str) return null;
+
+        for (let len = 1; len <= Math.min(3, str.length); len++) {
+          const sub = str.slice(0, len);
+          if (sub.length > 1 && sub.startsWith('0')) continue;
+          const val = parseInt(sub, 10);
+          if (val > prevVal && val <= measureEndPos) {
+            const rest = solvePositions(str.slice(len), count - 1, val);
+            if (rest !== null) return [val, ...rest];
+          }
+        }
+        return null;
+      }
+
+      let positions = solvePositions(digitsStr, noteCount, 0);
+
+      // Fallback if parsing didn't match perfectly
+      if (!positions) {
+        positions = rawNotes.map((_, i) => i + 1);
+      }
+
+      // 5. Build parsed note objects & durations
       const parsedNotes = rawNotes.map((noteToken, i) => {
         const baseName = noteToken[0];
         let freq = baseFreqs[baseName];
 
-        // Key signature default sharp (e.g., 1# makes F -> F#)
         if (keySig === '1#' && baseName === 'F' && noteToken.length === 1) {
           freq = 369.99; // F#4
         }
@@ -295,7 +312,7 @@
         if (noteToken.includes('#')) freq *= Math.pow(2, 1/12);
         if (noteToken.includes('b')) freq /= Math.pow(2, 1/12);
 
-        const currentPos = positions[i] !== undefined ? positions[i] : (i + 1);
+        const currentPos = positions[i];
         const nextPos = (i + 1 < positions.length) ? positions[i + 1] : (measureEndPos + 1);
         const beats = Math.max(1, nextPos - currentPos);
 
@@ -331,7 +348,6 @@
       const currentUrl = new URL(window.location.href);
       currentUrl.searchParams.set('song', inputEl.value);
 
-      // Update URL in address bar without reloading
       window.history.replaceState({}, '', currentUrl.toString());
 
       qrcodeContainer.innerHTML = '';
@@ -357,7 +373,7 @@
       }
 
       const bpm = parseFloat(bpmInput.value);
-      const beatSec = 60 / bpm; // Base duration of 1 step/beat in seconds
+      const beatSec = 60 / bpm;
 
       let currentTimeOffset = 0;
 
@@ -381,7 +397,6 @@
         osc.start(startTime);
         osc.stop(startTime + noteDurationSec);
 
-        // Highlight synchronized chip
         const highlightDelay = currentTimeOffset * 1000;
         setTimeout(() => {
           document.querySelectorAll('.note-chip').forEach(c => c.classList.remove('active'));
@@ -392,13 +407,11 @@
         currentTimeOffset += noteDurationSec;
       });
 
-      // Clear highlights when finished
       setTimeout(() => {
         document.querySelectorAll('.note-chip').forEach(c => c.classList.remove('active'));
       }, currentTimeOffset * 1000);
     }
 
-    // Event Listeners
     playBtn.addEventListener('click', playMelody);
     shareBtn.addEventListener('click', () => {
       parseAndDisplay();
