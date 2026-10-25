@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Chorus Melody & Beat Reader</title>
+  <!-- Load QRCode.js for generating QR codes directly in browser -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <style>
     :root {
@@ -80,6 +81,9 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
+      background: #f1f5f9;
+      padding: 10px 14px;
+      border-radius: 8px;
     }
 
     .tempo-control input[type="range"] {
@@ -101,7 +105,7 @@
       font-weight: 600;
       font-size: 1rem;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: background 0.2s, transform 0.1s;
     }
 
     button:hover {
@@ -133,6 +137,7 @@
       border-radius: 6px;
       font-weight: 600;
       font-size: 0.9rem;
+      min-width: 38px;
     }
 
     .note-chip .sub {
@@ -181,7 +186,7 @@
 
     <div class="input-group">
       <label for="singleLineInput">Notebook Notation Input</label>
-      <input type="text" id="singleLineInput" placeholder="e.g. 1# E F G F E A B F G E 1 2 3 5 6 7 10 11 12 13/16">
+      <input type="text" id="singleLineInput" placeholder="e.g. 1w E F G F E A B F G E 1 2 3 5 6 7 10 11 12 13_16">
     </div>
 
     <div class="tempo-control">
@@ -201,7 +206,7 @@
 
     <div class="qr-section">
       <div id="qrcode"></div>
-      <p class="share-hint">Scan with iPhone or Samsung camera to open this score.</p>
+      <p class="share-hint">Scan with iPhone or Samsung camera to open this exact score.</p>
     </div>
   </div>
 
@@ -224,52 +229,83 @@
       bpmVal.textContent = bpmInput.value;
     });
 
+    // Extract song notation from URL parameter on page load
     function loadFromUrl() {
       const urlParams = new URLSearchParams(window.location.search);
       const songParam = urlParams.get('song');
+
       if (songParam) {
         inputEl.value = songParam;
       } else {
-        inputEl.value = "1# E F G F E A B F G E 1 2 3 5 6 7 10 11 12 13/16";
+        // Default URL-safe sample string
+        inputEl.value = "1w E F G F E A B F G E 1 2 3 5 6 7 10 11 12 13_16";
       }
       parseAndDisplay();
       generateQR();
     }
 
+    // Parse key signatures, note symbols, step positions, and measure end length
     function parseScore(rawText) {
-      const tokens = rawText.trim().split(/\s+/);
+      // Clean string and handle URL decode '+' as spaces
+      const cleanText = rawText.replace(/\+/g, ' ').trim();
+      const tokens = cleanText.split(/[\s,]+/).filter(Boolean);
+
       let keySig = "";
       let rawNotes = [];
       let positions = [];
       let measureEndPos = 16;
 
+      // Check first token for key signature (e.g. 1w, 1s, 1#, 1b)
+      if (tokens.length && /^\d+[wsWS#b]$/.test(tokens[0])) {
+        const keyToken = tokens.shift();
+        keySig = keyToken.toLowerCase().replace('w', '#').replace('s', 'b');
+      }
+
+      // Check last token for measure end length (e.g. _16 or /16)
+      if (tokens.length && /[_/]\d+$/.test(tokens[tokens.length - 1])) {
+        const lastToken = tokens.pop();
+        const endMatch = lastToken.match(/[_/](\d+)$/);
+        if (endMatch) measureEndPos = parseFloat(endMatch[1]) || 16;
+
+        const prefix = lastToken.replace(/[_/]\d+$/, '');
+        if (prefix && !isNaN(parseFloat(prefix))) {
+          tokens.push(prefix);
+        }
+      }
+
       tokens.forEach(token => {
-        if (token.includes('#') || token.includes('b')) {
-          keySig = token;
-        } else if (/^[A-Ga-g]$/.test(token)) {
-          rawNotes.push(token.toUpperCase());
-        } else if (token.includes('/')) {
-          const parts = token.split('/');
-          positions.push(parseFloat(parts[0]));
-          measureEndPos = parseFloat(parts[1]) || 16;
+        if (/^[A-Ga-g][wsWS#b]?$/.test(token)) {
+          let normNote = token.toUpperCase().replace('W', '#').replace('S', 'b');
+          rawNotes.push(normNote);
         } else if (!isNaN(parseFloat(token))) {
           positions.push(parseFloat(token));
         }
       });
 
-      // Calculate beat durations based on step differences
-      const parsedNotes = rawNotes.map((name, i) => {
-        let freq = baseFreqs[name];
-        if (keySig === '1#' && name === 'F') freq = 369.99; // F#4
+      // Calculate frequencies and rhythmic beat durations
+      const parsedNotes = rawNotes.map((noteToken, i) => {
+        const baseName = noteToken[0];
+        let freq = baseFreqs[baseName];
+
+        // Key signature default sharp (e.g., 1# makes F -> F#)
+        if (keySig === '1#' && baseName === 'F' && noteToken.length === 1) {
+          freq = 369.99; // F#4
+        }
+
+        if (noteToken.includes('#')) freq *= Math.pow(2, 1/12);
+        if (noteToken.includes('b')) freq /= Math.pow(2, 1/12);
 
         const currentPos = positions[i] !== undefined ? positions[i] : (i + 1);
         const nextPos = (i + 1 < positions.length) ? positions[i + 1] : (measureEndPos + 1);
-        
-        // Difference calculation: e.g., 5 - 3 = 2 beats
         const beats = Math.max(1, nextPos - currentPos);
 
+        let displayName = noteToken;
+        if (keySig === '1#' && baseName === 'F' && noteToken.length === 1) {
+          displayName = 'F#';
+        }
+
         return {
-          name: (keySig === '1#' && name === 'F') ? 'F#' : name,
+          name: displayName,
           freq: freq,
           pos: currentPos,
           beats: beats
@@ -294,6 +330,8 @@
     function generateQR() {
       const currentUrl = new URL(window.location.href);
       currentUrl.searchParams.set('song', inputEl.value);
+
+      // Update URL in address bar without reloading
       window.history.replaceState({}, '', currentUrl.toString());
 
       qrcodeContainer.innerHTML = '';
@@ -343,6 +381,7 @@
         osc.start(startTime);
         osc.stop(startTime + noteDurationSec);
 
+        // Highlight synchronized chip
         const highlightDelay = currentTimeOffset * 1000;
         setTimeout(() => {
           document.querySelectorAll('.note-chip').forEach(c => c.classList.remove('active'));
@@ -353,11 +392,13 @@
         currentTimeOffset += noteDurationSec;
       });
 
+      // Clear highlights when finished
       setTimeout(() => {
         document.querySelectorAll('.note-chip').forEach(c => c.classList.remove('active'));
       }, currentTimeOffset * 1000);
     }
 
+    // Event Listeners
     playBtn.addEventListener('click', playMelody);
     shareBtn.addEventListener('click', () => {
       parseAndDisplay();
